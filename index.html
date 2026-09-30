@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Oranlar">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
+<title>Oranlar</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#000;color:#fff;font-family:-apple-system,system-ui,sans-serif;
+ padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;justify-content:space-between;padding:14px 0}
+h1{font-size:28px;margin:0}
+.btns button{background:#1c1c1e;color:#fff;border:0;border-radius:10px;font-size:20px;
+ width:42px;height:42px;margin-left:8px}
+.card{background:#1c1c1e;border-radius:14px;padding:14px;margin-bottom:12px}
+.card h3{margin:0 0 10px;font-size:17px}
+.row{display:flex;gap:8px}
+.box{flex:1;text-align:center;background:#2c2c2e;border-radius:10px;padding:8px 0}
+.box small{display:block;color:#8e8e93;font-size:12px;min-height:15px}
+.box b{font-size:21px}
+.box.dn{background:#5c1d1d}.box.up{background:#14502a}
+.mut{color:#8e8e93}
+.err{color:#ff453a;font-size:13px}
+.sheet{position:fixed;inset:0;background:#000;overflow:auto;padding:env(safe-area-inset-top) 14px 30px;display:none}
+.sheet.on{display:block}
+.sheet input,.sheet button.wide{width:100%;padding:12px;margin:6px 0;border-radius:10px;border:0;
+ background:#1c1c1e;color:#fff;font-size:16px}
+.item{display:flex;justify-content:space-between;padding:13px 4px;border-bottom:1px solid #2c2c2e}
+.top{display:flex;justify-content:space-between;align-items:center;padding:14px 0}
+.top button{background:none;border:0;color:#0a84ff;font-size:17px}
+label{display:block;color:#8e8e93;font-size:13px;margin-top:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Oranlar</h1>
+  <div class="btns">
+    <button id="bAdd">+</button>
+    <button id="bSet">⚙︎</button>
+  </div>
+</header>
+<div id="err" class="err"></div>
+<div id="list"></div>
+
+<div id="picker" class="sheet">
+  <div class="top"><b>Maç Seç</b><button id="pClose">Bitti</button></div>
+  <input id="q" placeholder="Maç ara">
+  <div id="plist"></div>
+</div>
+
+<div id="settings" class="sheet">
+  <div class="top"><b>Ayarlar</b><button id="sClose">Bitti</button></div>
+  <label>API adresi (endpoint)</label><input id="cUrl" autocapitalize="off" autocorrect="off">
+  <label>API key</label><input id="cKey" autocapitalize="off" autocorrect="off">
+  <label>Key header adı (dokümana göre)</label><input id="cHeader" autocapitalize="off" autocorrect="off">
+  <label>Kontrol aralığı (saniye)</label><input id="cSec" type="number" inputmode="numeric">
+  <button class="wide" id="bNotif">Bildirimleri aç</button>
+  <button class="wide" id="bWake">Ekran açık kalsın: KAPALI</button>
+  <p class="mut">Not: iOS, uygulama kapalıyken veya arka plandayken kontrol yapmaz.
+  Takip sırasında uygulamayı açık tut.</p>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const DEF = {url:'', key:'', header:'X-API-Key', sec:30};
+const cfg = () => ({...DEF, ...JSON.parse(localStorage.cfg || '{}')});
+let sel = new Set(JSON.parse(localStorage.sel || '[]'));
+let last = JSON.parse(localStorage.last || '{}');
+let all = [], changes = {}, timer = null, wake = null;
+
+// ---------- API ----------
+// TODO: Pinnodds JSON cevabına göre doldurulacak.
+// Dönmesi gereken: [{id, home, away, ms1, ms0, ms2}, ...]  (oranlar sayı)
+function parse(json) {
+  throw new Error('parse() henüz API formatına göre doldurulmadı');
+}
+
+async function fetchMatches() {
+  const c = cfg();
+  if (!c.url) throw new Error('Ayarlardan API adresini gir');
+  const h = {};
+  if (c.key) h[c.header] = c.key;
+  const r = await fetch(c.url, {headers: h});
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return parse(await r.json());
+}
+
+// ---------- Bildirim ----------
+async function notify(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    reg.showNotification(title, {body});
+  } catch (e) {}
+}
+
+// ---------- Yenileme ----------
+async function refresh() {
+  try {
+    const fresh = await fetchMatches();
+    $('#err').textContent = '';
+    for (const m of fresh) {
+      const o = last[m.id];
+      if (o && sel.has(m.id)) {
+        for (const k of ['ms1', 'ms0', 'ms2']) {
+          if (o[k] !== m[k]) {
+            (changes[m.id] = changes[m.id] || {})[k] = {o: o[k], n: m[k]};
+            notify(m.home + ' - ' + m.away,
+              k.toUpperCase().replace('MS', 'MS ') + ': ' + o[k].toFixed(2) + ' → ' +
+              m[k].toFixed(2) + (m[k] < o[k] ? ' ▼' : ' ▲'));
+          }
+        }
+      }
+      last[m.id] = {ms1: m.ms1, ms0: m.ms0, ms2: m.ms2};
+    }
+    localStorage.last = JSON.stringify(last);
+    all = fresh;
+  } catch (e) {
+    $('#err').textContent = e.message;
+  }
+  render();
+}
+
+function schedule() {
+  clearInterval(timer);
+  timer = setInterval(refresh, Math.max(10, cfg().sec) * 1000);
+}
+
+// ---------- Arayüz ----------
+const SIDES = [['ms1', 'MS 1'], ['ms0', 'MS 0'], ['ms2', 'MS 2']];
+
+function card(m) {
+  const ch = changes[m.id] || {};
+  const boxes = SIDES.map(([k, l]) => {
+    const c = ch[k];
+    const cls = c ? (c.n < c.o ? 'dn' : 'up') : '';
+    const sub = c ? c.o.toFixed(2) + (c.n < c.o ? ' ▼' : ' ▲') : '&nbsp;';
+    return `<div class="box ${cls}"><small>${l}</small><b>${m[k].toFixed(2)}</b><small>${sub}</small></div>`;
+  }).join('');
+  return `<div class="card" data-id="${esc(m.id)}"><h3>${esc(m.home)} - ${esc(m.away)}</h3><div class="row">${boxes}</div></div>`;
+}
+
+function render() {
+  const tr = all.filter(m => sel.has(m.id));
+  $('#list').innerHTML = tr.length ? tr.map(card).join('')
+    : '<p class="mut">Maç seçilmedi. Sağ üstten + ile ekle.</p>';
+  renderPicker();
+}
+
+function renderPicker() {
+  const q = $('#q').value.toLowerCase();
+  $('#plist').innerHTML = all
+    .filter(m => (m.home + ' ' + m.away).toLowerCase().includes(q))
+    .map(m => `<div class="item" data-id="${esc(m.id)}"><span>${esc(m.home)} - ${esc(m.away)}</span><span>${sel.has(m.id) ? '✅' : '○'}</span></div>`)
+    .join('');
+}
+
+$('#list').onclick = e => {
+  const c = e.target.closest('.card');
+  if (c) { delete changes[c.dataset.id]; render(); }   // karta dokun: işareti temizle
+};
+$('#plist').onclick = e => {
+  const i = e.target.closest('.item');
+  if (!i) return;
+  const id = i.dataset.id;
+  sel.has(id) ? (sel.delete(id), delete changes[id]) : sel.add(id);
+  localStorage.sel = JSON.stringify([...sel]);
+  render();
+};
+$('#q').oninput = renderPicker;
+$('#bAdd').onclick = () => $('#picker').classList.add('on');
+$('#pClose').onclick = () => $('#picker').classList.remove('on');
+$('#bSet').onclick = () => {
+  const c = cfg();
+  $('#cUrl').value = c.url; $('#cKey').value = c.key;
+  $('#cHeader').value = c.header; $('#cSec').value = c.sec;
+  $('#settings').classList.add('on');
+};
+$('#sClose').onclick = () => {
+  localStorage.cfg = JSON.stringify({
+    url: $('#cUrl').value.trim(), key: $('#cKey').value.trim(),
+    header: $('#cHeader').value.trim() || 'X-API-Key',
+    sec: parseInt($('#cSec').value) || 30
+  });
+  $('#settings').classList.remove('on');
+  schedule(); refresh();
+};
+$('#bNotif').onclick = async () => {
+  if (!('Notification' in window)) { alert('Önce Paylaş → Ana Ekrana Ekle ile kur, sonra ana ekrandaki ikondan aç.'); return; }
+  const p = await Notification.requestPermission();
+  $('#bNotif').textContent = p === 'granted' ? 'Bildirimler açık ✓' : 'Bildirim izni verilmedi';
+};
+$('#bWake').onclick = async () => {
+  try {
+    if (wake) { await wake.release(); wake = null; $('#bWake').textContent = 'Ekran açık kalsın: KAPALI'; }
+    else { wake = await navigator.wakeLock.request('screen'); $('#bWake').textContent = 'Ekran açık kalsın: AÇIK'; }
+  } catch (e) { alert('Bu cihazda desteklenmiyor'); }
+};
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+schedule(); refresh();
+</script>
+</body>
+</html>
