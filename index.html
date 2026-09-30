@@ -86,17 +86,19 @@ function parse(json) {
     return [];
   }
 
-  return json.events.map(m => {
-    const ml = m.periods?.num_0?.money_line || {};
-    return {
-      id: String(m.event_id),
-      home: m.home || "Ev Sahibi",
-      away: m.away || "Deplasman",
-      ms1: ml.home || 0,
-      ms0: ml.draw || 0,
-      ms2: ml.away || 0
-    };
-  }).filter(m => m.ms1 > 0 || m.ms0 > 0 || m.ms2 > 0);
+  return json.events
+    .filter(m => m.parent_id === null) // Sadece ana maçları filtrele
+    .map(m => {
+      const ml = m.periods?.num_0?.money_line || {};
+      return {
+        id: String(m.event_id),
+        home: m.home || "Ev Sahibi",
+        away: m.away || "Deplasman",
+        ms1: ml.home || 0,
+        ms0: ml.draw || 0,
+        ms2: ml.away || 0
+      };
+    }).filter(m => m.ms1 > 0 || m.ms0 > 0 || m.ms2 > 0);
 }
 
 async function fetchMatches() {
