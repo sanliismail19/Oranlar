@@ -81,10 +81,22 @@ let last = JSON.parse(localStorage.last || '{}');
 let all = [], changes = {}, timer = null, wake = null;
 
 // ---------- API ----------
-// TODO: Pinnodds JSON cevabına göre doldurulacak.
-// Dönmesi gereken: [{id, home, away, ms1, ms0, ms2}, ...]  (oranlar sayı)
 function parse(json) {
-  throw new Error('parse() henüz API formatına göre doldurulmadı');
+  if (!json || !json.events || !Array.isArray(json.events)) {
+    return [];
+  }
+
+  return json.events.map(m => {
+    const ml = m.periods?.num_0?.money_line || {};
+    return {
+      id: String(m.event_id),
+      home: m.home || "Ev Sahibi",
+      away: m.away || "Deplasman",
+      ms1: ml.home || 0,
+      ms0: ml.draw || 0,
+      ms2: ml.away || 0
+    };
+  }).filter(m => m.ms1 > 0 || m.ms0 > 0 || m.ms2 > 0);
 }
 
 async function fetchMatches() {
@@ -129,6 +141,8 @@ async function refresh() {
   try {
     const fresh = await fetchMatches();
     $('#err').textContent = '';
+    $('#rawbox').style.display = 'none';
+    
     for (const m of fresh) {
       const o = last[m.id];
       if (o && sel.has(m.id)) {
@@ -188,7 +202,7 @@ function renderPicker() {
 
 $('#list').onclick = e => {
   const c = e.target.closest('.card');
-  if (c) { delete changes[c.dataset.id]; render(); }   // karta dokun: işareti temizle
+  if (c) { delete changes[c.dataset.id]; render(); }
 };
 $('#plist').onclick = e => {
   const i = e.target.closest('.item');
