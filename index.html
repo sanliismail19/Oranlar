@@ -46,6 +46,11 @@ label{display:block;color:#8e8e93;font-size:13px;margin-top:10px}
   </div>
 </header>
 <div id="err" class="err"></div>
+<div id="rawbox" style="display:none">
+  <p class="mut">API'den gelen örnek cevap. Kopyala düğmesine bas ve sohbete yapıştır:</p>
+  <textarea id="raw" readonly style="width:100%;height:260px;background:#1c1c1e;color:#fff;border:0;border-radius:10px;padding:10px;font-size:12px"></textarea>
+  <button id="bCopy" style="width:100%;padding:12px;margin:8px 0;border:0;border-radius:10px;background:#0a84ff;color:#fff;font-size:16px">Kopyala</button>
+</div>
 <div id="list"></div>
 
 <div id="picker" class="sheet">
@@ -89,7 +94,25 @@ async function fetchMatches() {
   if (c.key) h[c.header] = c.key;
   const r = await fetch(c.url, {headers: h});
   if (!r.ok) throw new Error('HTTP ' + r.status);
-  return parse(await r.json());
+  const json = await r.json();
+  window.rawJson = json;
+  return parse(json);
+}
+
+function trimSample(x, d = 0) {
+  if (Array.isArray(x)) return x.slice(0, 2).map(v => trimSample(v, d + 1));
+  if (x && typeof x === 'object' && d < 6) {
+    const o = {};
+    for (const k in x) o[k] = trimSample(x[k], d + 1);
+    return o;
+  }
+  return x;
+}
+
+function showRaw() {
+  if (!window.rawJson) { $('#rawbox').style.display = 'none'; return; }
+  $('#raw').value = JSON.stringify(trimSample(window.rawJson), null, 1).slice(0, 8000);
+  $('#rawbox').style.display = 'block';
 }
 
 // ---------- Bildirim ----------
@@ -124,6 +147,7 @@ async function refresh() {
     all = fresh;
   } catch (e) {
     $('#err').textContent = e.message;
+    if (String(e.message).includes('parse()')) showRaw();
   }
   render();
 }
@@ -175,6 +199,10 @@ $('#plist').onclick = e => {
   render();
 };
 $('#q').oninput = renderPicker;
+$('#bCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('#raw').value); $('#bCopy').textContent = 'Kopyalandı ✓'; }
+  catch (e) { $('#raw').select(); $('#bCopy').textContent = 'Metni seçtim, elle kopyala'; }
+};
 $('#bAdd').onclick = () => $('#picker').classList.add('on');
 $('#pClose').onclick = () => $('#picker').classList.remove('on');
 $('#bSet').onclick = () => {
